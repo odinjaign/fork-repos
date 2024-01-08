@@ -13,6 +13,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/telegram/peers"
 
@@ -72,7 +73,7 @@ func newIter(pool dcpool.Pool, manager *peers.Manager, dialog [][]*tmessage.Dial
 	excludeMap := filterMap(opts.Exclude, utils.FS.AddPrefixDot)
 
 	// to keep fingerprint stable
-	sortDialogs(dialogs, opts.Desc)
+	sortDialogs(dialogs, opts.Desc, opts.StartID)
 
 	return &iter{
 		pool:    pool,
@@ -180,6 +181,8 @@ func (i *iter) process(ctx context.Context) (ret bool, skip bool) {
 		if stat, err := os.Stat(filepath.Join(i.opts.Dir, toName.String())); err == nil {
 			if utils.FS.GetNameWithoutExt(toName.String()) == utils.FS.GetNameWithoutExt(stat.Name()) &&
 				stat.Size() == item.Size {
+				// 跳过
+				color.Green("The file '%s' will be downloaded because skip same", stat.Name())
 				return false, true
 			}
 		}
@@ -282,13 +285,27 @@ func filterMap(data []string, keyFn func(key string) string) map[string]struct{}
 	return m
 }
 
-func sortDialogs(dialogs []*tmessage.Dialog, desc bool) {
+func sortDialogs(dialogs []*tmessage.Dialog, desc bool, startId int) {
 	sort.Slice(dialogs, func(i, j int) bool {
 		return utils.Telegram.GetInputPeerID(dialogs[i].Peer) <
 			utils.Telegram.GetInputPeerID(dialogs[j].Peer) // increasing order
 	})
 
 	for _, m := range dialogs {
+		if startId != -1 {
+			var cleanMessages []int
+			for _, msgId := range m.Messages {
+				// 逆序，大于的不加入
+				if msgId <= startId && desc {
+					cleanMessages = append(cleanMessages, msgId)
+				}
+				// 顺序， 小于的不加入
+				if msgId >= startId && !desc {
+					cleanMessages = append(cleanMessages, msgId)
+				}
+			}
+			m.Messages = cleanMessages
+		}
 		sort.Slice(m.Messages, func(i, j int) bool {
 			if desc {
 				return m.Messages[i] > m.Messages[j]
